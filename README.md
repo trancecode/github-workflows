@@ -23,6 +23,8 @@ Design and rationale live in
 | `issue-dependencies.yml` | Maintains `ready` and `blocked` from native issue dependencies |
 | `merge-conflict-label.yml` | Maintains the `merge conflict` label on pull requests |
 | `monthly-audit.yml` | Opens the monthly workflow audit issue |
+| `go-analysis.yml` | gofmt, go vet, staticcheck, golangci-lint, blank lines |
+| `go-race.yml` | `go test -race` |
 
 ## Calling a workflow
 
@@ -83,6 +85,11 @@ every consumer at once.
 
    Delete the branch afterwards. This matters most for the scheduled workflows,
    where the alternative is waiting a month for signal.
+
+   **`workflow_dispatch` only resolves workflows that already exist on the
+   consumer's default branch.** To test a stub that is not on `main` yet, give
+   the branch copy a `push:` trigger scoped to that branch instead, which is
+   what the initial Go rollout used.
 4. Merge to `main`.
 
 ## Recovery
@@ -93,3 +100,32 @@ heals on its next run.
 This path is manual by necessity. `input-required-label.yml` and the other label
 workflows are the autonomous agent's own control plane, so breaking them can
 remove its ability to detect the work needed to fix them.
+
+
+## Go workflow inputs
+
+`go-analysis.yml` and `go-race.yml` take inputs for the two things that genuinely
+vary across repositories: the apt packages needed to compile, and whether the
+tests need a display.
+
+Three further inputs exist so a repository can adopt the workflow before its
+backlog is clear, rather than the whole adoption being blocked:
+
+- `golangci-args` defaults to `--disable=staticcheck`, because staticcheck runs
+  standalone and pinned in the same workflow. golangci-lint bundles it too but
+  with the QF quickfix family enabled, so leaving both on reports one tool twice
+  with different opinions. Note that golangci-lint's `unused` linter is
+  staticcheck's `U1000` under another name, so excluding one usually means
+  excluding both.
+- `staticcheck-checks` defaults to `inherit`. A repository adopting staticcheck
+  for the first time can narrow this, for example `inherit,-U1000,-SA1019`.
+- `check-gofmt` and `check-blank-lines` can be turned off.
+
+Every exclusion in a consumer stub should have a tracked issue against it. They
+are adoption ramps, not settled policy.
+
+## Race cadence
+
+Race builds roughly double test time, and Actions minutes are only billed for
+private repositories. So public repositories and fast libraries run `-race` on
+every push, while the private GUI repositories run it weekly.
