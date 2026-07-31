@@ -3,10 +3,28 @@ name: Pages Deploy
 on:
   workflow_call:
     inputs:
-      path:
-        description: Directory to publish.
+      generator:
+        description: >-
+          Built-in documentation generator: `doc2go`, `gopages`, `pkgsite`, or
+          `none`. Presets exist so a new repository gets docs on Pages without
+          writing any shell. Use `build-command` for anything else.
         type: string
-        required: true
+        required: false
+        default: 'none'
+      package:
+        description: >-
+          Import path documented by the `pkgsite` generator, for example
+          github.com/trancecode/ecs/ecs. Ignored by the other generators.
+        type: string
+        required: false
+        default: ''
+      path:
+        description: >-
+          Directory to publish. Ignored unless `generator` is `none`, since
+          each preset publishes its own output directory.
+        type: string
+        required: false
+        default: '.'
       build-command:
         description: >-
           Shell run before the upload, to produce `path`. Left empty the
@@ -86,17 +104,75 @@ jobs:
         if: steps.pages-check.outputs.skipped != 'true'
         uses: actions/configure-pages@v5
 
+      - name: Generate docs (doc2go)
+        if: inputs.generator == 'doc2go' && steps.pages-check.outputs.skipped != 'true'
+        run: |
+          go install go.abhg.dev/doc2go@latest
+          # Always generate from main so the published output is idempotent
+          # regardless of which ref triggered the run.
+          git fetch origin main
+          git checkout origin/main
+          mkdir -p docs/packages
+          doc2go -out docs/packages ./...
+          mkdir -p pages-content
+          cp -r docs pages-content/
+          [ -d html ] && cp -r html pages-content/ || true
+
+      - name: Generate docs (gopages)
+        if: inputs.generator == 'gopages' && steps.pages-check.outputs.skipped != 'true'
+        run: go run github.com/johnstarich/go/gopages@latest -base "${{ steps.pages.outputs.base_url }}"
+
+      - name: Generate docs (pkgsite)
+        if: inputs.generator == 'pkgsite' && steps.pages-check.outputs.skipped != 'true'
+        env:
+          PKG: ${{ inputs.package }}
+        run: |
+          if [ -z "$PKG" ]; then
+            echo "generator: pkgsite requires the 'package' input"
+            exit 1
+          fi
+          go install golang.org/x/pkgsite/cmd/pkgsite@latest
+          "$(go env GOPATH)/bin/pkgsite" -http=localhost:8080 . &
+          PID=$!
+          # Wait for the server to answer for our package.
+          for _ in $(seq 1 60); do
+            curl -sf "http://localhost:8080/$PKG" >/dev/null && break
+            sleep 1
+          done
+          mkdir -p site
+          wget --recursive --level=4 --no-parent --convert-links --page-requisites \
+               --adjust-extension --execute robots=off --no-host-directories \
+               --directory-prefix=site "http://localhost:8080/$PKG" || true
+          kill "$PID" 2>/dev/null || true
+          # Root redirect to the package page, and disable Jekyll so pkgsite's
+          # static asset directories are served as-is.
+          printf '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=./%s.html"><a href="./%s.html">documentation</a>\n' "$PKG" "$PKG" > site/index.html
+          touch site/.nojekyll
+
       - name: Build
         if: inputs.build-command != '' && steps.pages-check.outputs.skipped != 'true'
         env:
           PAGES_BASE_URL: ${{ steps.pages.outputs.base_url }}
         run: ${{ inputs.build-command }}
 
+      - name: Resolve publish directory
+        id: publish
+        if: steps.pages-check.outputs.skipped != 'true'
+        run: |
+          case '${{ inputs.generator }}' in
+            doc2go)  dir=pages-content ;;
+            gopages) dir=dist ;;
+            pkgsite) dir=site ;;
+            *)       dir='${{ inputs.path }}' ;;
+          esac
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+          echo "Publishing $dir"
+
       - name: Upload artifact
         if: steps.pages-check.outputs.skipped != 'true'
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ${{ inputs.path }}
+          path: ${{ steps.publish.outputs.dir }}
 
   deploy:
     needs: build
