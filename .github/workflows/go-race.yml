@@ -1,0 +1,69 @@
+name: Go Race Detector
+
+on:
+  workflow_call:
+    inputs:
+      system-packages:
+        description: >-
+          Space-separated apt packages needed to compile this repository.
+        type: string
+        required: false
+        default: ''
+      go-version-file:
+        description: File the Go version is read from.
+        type: string
+        required: false
+        default: 'go.mod'
+      xvfb:
+        description: >-
+          Wrap the test run in xvfb-run. Needed by repositories whose tests
+          open a window or a GL context.
+        type: boolean
+        required: false
+        default: false
+      packages:
+        description: Package pattern to test.
+        type: string
+        required: false
+        default: './...'
+      timeout:
+        description: Go test timeout. Race builds are substantially slower.
+        type: string
+        required: false
+        default: '20m'
+
+permissions:
+  contents: read
+
+jobs:
+  race:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system packages
+        if: inputs.system-packages != ''
+        run: |
+          sudo apt-get update
+          # Deliberately unquoted: the input is a space-separated package list.
+          # shellcheck disable=SC2086
+          sudo apt-get install -y ${{ inputs.system-packages }}
+
+      - name: Install xvfb
+        if: inputs.xvfb
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ inputs.go-version-file }}
+
+      - name: Run tests with the race detector
+        run: |
+          echo "::group::go test -race"
+          if [ "${{ inputs.xvfb }}" = "true" ]; then
+            xvfb-run -a go test -race -timeout "${{ inputs.timeout }}" ${{ inputs.packages }}
+          else
+            go test -race -timeout "${{ inputs.timeout }}" ${{ inputs.packages }}
+          fi
+          echo "::endgroup::"

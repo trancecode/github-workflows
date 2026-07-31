@@ -1,0 +1,116 @@
+name: Go Analysis
+
+on:
+  workflow_call:
+    inputs:
+      system-packages:
+        description: >-
+          Space-separated apt packages needed to compile this repository.
+          GUI and GL repositories need X11 and Mesa headers; headless
+          libraries need nothing.
+        type: string
+        required: false
+        default: ''
+      go-version-file:
+        description: File the Go version is read from.
+        type: string
+        required: false
+        default: 'go.mod'
+      staticcheck-version:
+        description: >-
+          Pinned staticcheck release. Never use @latest: a toolchain that
+          moves underneath CI fails builds on commits that changed nothing.
+        type: string
+        required: false
+        default: '2026.1'
+      golangci-version:
+        description: Pinned golangci-lint release.
+        type: string
+        required: false
+        default: 'v2.9.0'
+      check-gofmt:
+        description: Fail if any file is not gofmt-clean.
+        type: boolean
+        required: false
+        default: true
+      check-blank-lines:
+        description: Fail on multiple consecutive blank lines in Go sources.
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system packages
+        if: inputs.system-packages != ''
+        run: |
+          sudo apt-get update
+          # Deliberately unquoted: the input is a space-separated package list.
+          # shellcheck disable=SC2086
+          sudo apt-get install -y ${{ inputs.system-packages }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ inputs.go-version-file }}
+
+      - name: Check formatting
+        if: inputs.check-gofmt
+        run: |
+          echo "::group::gofmt"
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+          echo "All files are gofmt-clean"
+          echo "::endgroup::"
+
+      - name: Run go vet
+        run: |
+          echo "::group::go vet"
+          go vet ./...
+          echo "::endgroup::"
+
+      - name: Install staticcheck
+        run: go install "honnef.co/go/tools/cmd/staticcheck@${{ inputs.staticcheck-version }}"
+
+      - name: Run staticcheck
+        run: |
+          echo "::group::staticcheck"
+          staticcheck ./...
+          echo "::endgroup::"
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: ${{ inputs.golangci-version }}
+
+      - name: Check for multiple consecutive blank lines
+        if: inputs.check-blank-lines
+        run: |
+          echo "::group::consecutive blank lines"
+          # Inlined rather than calling a repository script, so repositories
+          # that never had this check do not need to add one to adopt it.
+          found=0
+          while IFS= read -r file; do
+            if awk 'BEGIN{blank=0} /^[[:space:]]*$/{blank++; if(blank>1){print FILENAME": "NR; exit 1}next} {blank=0}' "$file"; then
+              :
+            else
+              found=1
+            fi
+          done < <(find . -name '*.go' -not -path './vendor/*' -print)
+          if [ "$found" -ne 0 ]; then
+            echo "Files above contain multiple consecutive blank lines"
+            exit 1
+          fi
+          echo "No multiple consecutive blank lines"
+          echo "::endgroup::"
