@@ -15,6 +15,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Run actionlint
+        env:
+          # Gate on real problems only. The workflows inherited from the managed
+          # repositories carry shellcheck info/style findings (unquoted version
+          # strings written to $GITHUB_OUTPUT, consecutive redirects) that are
+          # safe in context; failing on them would block every change.
+          SHELLCHECK_OPTS: -S warning
         run: |
           bash <(curl -s https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
           ./actionlint -color
