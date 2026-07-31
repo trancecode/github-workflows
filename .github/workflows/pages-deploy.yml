@@ -1,0 +1,118 @@
+name: Pages Deploy
+
+on:
+  workflow_call:
+    inputs:
+      path:
+        description: Directory to publish.
+        type: string
+        required: true
+      build-command:
+        description: >-
+          Shell run before the upload, to produce `path`. Left empty the
+          directory is published as-is, which is what a repository serving
+          static files wants. `PAGES_BASE_URL` is exported from
+          actions/configure-pages, since some doc generators need it.
+        type: string
+        required: false
+        default: ''
+      go-version-file:
+        description: >-
+          Set up Go from this file before building. Left empty Go is not
+          installed at all, so a non-Go repository pays nothing.
+        type: string
+        required: false
+        default: ''
+      system-packages:
+        description: Space-separated apt packages needed by the build.
+        type: string
+        required: false
+        default: ''
+      require-pages-enabled:
+        description: >-
+          Check that Pages is actually enabled and exit cleanly if not, rather
+          than failing the run. Useful where Pages is enabled per repository
+          rather than as a rule.
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      skipped: ${{ steps.pages-check.outputs.skipped }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check GitHub Pages is enabled
+        id: pages-check
+        if: inputs.require-pages-enabled
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api "repos/${{ github.repository }}/pages" >/dev/null 2>&1; then
+            echo "skipped=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "GitHub Pages is not enabled for this repository; skipping."
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install system packages
+        if: inputs.system-packages != '' && steps.pages-check.outputs.skipped != 'true'
+        run: |
+          sudo apt-get update
+          # Deliberately unquoted: the input is a space-separated package list.
+          # shellcheck disable=SC2086
+          sudo apt-get install -y ${{ inputs.system-packages }}
+
+      - name: Set up Go
+        if: inputs.go-version-file != '' && steps.pages-check.outputs.skipped != 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ inputs.go-version-file }}
+          check-latest: true
+          cache: true
+
+      # Runs before the build so generators that need the published URL, such
+      # as gopages -base, can read it from PAGES_BASE_URL.
+      - name: Configure Pages
+        id: pages
+        if: steps.pages-check.outputs.skipped != 'true'
+        uses: actions/configure-pages@v5
+
+      - name: Build
+        if: inputs.build-command != '' && steps.pages-check.outputs.skipped != 'true'
+        env:
+          PAGES_BASE_URL: ${{ steps.pages.outputs.base_url }}
+        run: ${{ inputs.build-command }}
+
+      - name: Upload artifact
+        if: steps.pages-check.outputs.skipped != 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ inputs.path }}
+
+  deploy:
+    needs: build
+    if: needs.build.outputs.skipped != 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url || steps.deployment-retry.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+
+      # The Pages deploy API is intermittently flaky; one retry clears it.
+      - name: Retry deploy to GitHub Pages
+        id: deployment-retry
+        if: steps.deployment.outcome == 'failure'
+        uses: actions/deploy-pages@v4

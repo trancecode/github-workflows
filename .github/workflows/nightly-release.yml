@@ -1,0 +1,118 @@
+name: Nightly Release
+
+on:
+  workflow_call:
+    inputs:
+      binary-name:
+        description: Output binary name, without the .exe suffix.
+        type: string
+        required: true
+      build-target:
+        description: Package path passed to go build.
+        type: string
+        required: false
+        default: '.'
+      system-packages:
+        description: Space-separated apt packages needed to build.
+        type: string
+        required: false
+        default: ''
+      go-version-file:
+        description: File the Go version is read from.
+        type: string
+        required: false
+        default: 'go.mod'
+      skip-unchanged-schedule:
+        description: >-
+          On scheduled runs only, skip when there has been no commit in the
+          last 24 hours. A nightly build of an unchanged tree is pure
+          Actions-minute burn.
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for recent commits
+        id: check_commits
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ] || [ "${{ inputs.skip-unchanged-schedule }}" != "true" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          LAST_COMMIT_DATE=$(git log -1 --format=%ct HEAD)
+          CURRENT_DATE=$(date +%s)
+          HOURS_SINCE=$(( (CURRENT_DATE - LAST_COMMIT_DATE) / 3600 ))
+          echo "Hours since last commit: $HOURS_SINCE"
+          if [ "$HOURS_SINCE" -gt 24 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "No commits in the last 24 hours, skipping nightly build"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install system packages
+        if: steps.check_commits.outputs.skip != 'true' && inputs.system-packages != ''
+        run: |
+          sudo apt-get update
+          # Deliberately unquoted: the input is a space-separated package list.
+          # shellcheck disable=SC2086
+          sudo apt-get install -y ${{ inputs.system-packages }}
+
+      - name: Set up Go
+        if: steps.check_commits.outputs.skip != 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ inputs.go-version-file }}
+          check-latest: true
+          cache: true
+
+      - name: Install Windows cross-compilation dependencies
+        if: steps.check_commits.outputs.skip != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64
+
+      - name: Build for Windows
+        if: steps.check_commits.outputs.skip != 'true'
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: 1
+          CC: x86_64-w64-mingw32-gcc
+          GOFLAGS: "-buildvcs=false"
+        run: |
+          go build -o "${{ inputs.binary-name }}.exe" ${{ inputs.build-target }}
+          echo "Build completed successfully"
+
+      - name: Create release archive
+        if: steps.check_commits.outputs.skip != 'true'
+        run: |
+          zip "${{ inputs.binary-name }}-windows-amd64.zip" "${{ inputs.binary-name }}.exe"
+          echo "Archive created successfully"
+
+      - name: Update nightly release
+        if: steps.check_commits.outputs.skip != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          name: Nightly Build
+          body: |
+            This is an automated nightly build of the latest main branch.
+
+            **Warning:** This build is automatically generated and may be unstable.
+
+            Last updated: ${{ github.event.repository.updated_at }}
+            Commit: ${{ github.sha }}
+          files: ${{ inputs.binary-name }}-windows-amd64.zip
+          prerelease: true
+          make_latest: false
