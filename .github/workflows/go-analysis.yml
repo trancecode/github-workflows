@@ -36,6 +36,15 @@ on:
         type: string
         required: false
         default: '--disable=staticcheck'
+      staticcheck-checks:
+        description: >-
+          staticcheck check selection. Repositories adopting staticcheck for
+          the first time can exclude the style and dead-code families here and
+          tighten later, so the correctness checks (SA) gate immediately
+          instead of the whole adoption being blocked.
+        type: string
+        required: false
+        default: 'inherit'
       check-gofmt:
         description: Fail if any file is not gofmt-clean.
         type: boolean
@@ -94,7 +103,7 @@ jobs:
       - name: Run staticcheck
         run: |
           echo "::group::staticcheck"
-          staticcheck ./...
+          staticcheck -checks '${{ inputs.staticcheck-checks }}' ./...
           echo "::endgroup::"
 
       - name: Run golangci-lint
