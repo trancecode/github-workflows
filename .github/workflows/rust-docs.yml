@@ -1,0 +1,119 @@
+name: Rust Docs
+
+on:
+  workflow_call:
+    inputs:
+      system-packages:
+        description: Space-separated apt packages needed to build this crate.
+        type: string
+        required: false
+        default: ''
+      toolchain:
+        description: Rust toolchain passed to dtolnay/rust-toolchain.
+        type: string
+        required: false
+        default: 'stable'
+      crate-name:
+        description: >-
+          Crate the root index.html redirects to. Left empty it is read from
+          Cargo.toml, so a new repository needs no configuration here at all.
+        type: string
+        required: false
+        default: ''
+      skip-unchanged-schedule:
+        description: >-
+          On scheduled runs only, skip when no Rust source changed in the last
+          25 hours.
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  check-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      has_changes: ${{ steps.check.outputs.has_changes }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for recent Rust source changes
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ] || [ "${{ inputs.skip-unchanged-schedule }}" != "true" ]; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          elif git log --since="25 hours ago" --name-only --pretty=format: -- '*.rs' 'Cargo.toml' 'Cargo.lock' | grep -q .; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo "No Rust source changes in the last 25 hours, skipping doc build"
+          fi
+
+  build:
+    needs: check-changes
+    if: needs.check-changes.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ inputs.toolchain }}
+
+      - name: Install system dependencies
+        if: inputs.system-packages != ''
+        run: |
+          sudo apt-get update
+          # Deliberately unquoted: the input is a space-separated package list.
+          # shellcheck disable=SC2086
+          sudo apt-get install -y ${{ inputs.system-packages }}
+
+      - name: Build documentation
+        run: cargo doc --no-deps
+
+      - name: Add redirect index.html
+        run: |
+          crate='${{ inputs.crate-name }}'
+          if [ -z "$crate" ]; then
+            # rustdoc writes its output directory with hyphens replaced by
+            # underscores, so derive the same form the package name produces.
+            crate="$(cargo metadata --no-deps --format-version 1 \
+              | grep -o '"name":"[^"]*"' | head -n 1 | cut -d'"' -f4 | tr '-' '_')"
+          fi
+          if [ -z "$crate" ] || [ ! -d "target/doc/$crate" ]; then
+            echo "Could not determine the crate doc directory (guessed '$crate')."
+            echo "Contents of target/doc:"
+            ls -1 target/doc
+            exit 1
+          fi
+          echo "Redirecting to $crate/index.html"
+          printf '<meta http-equiv="refresh" content="0;url=%s/index.html">\n' "$crate" > target/doc/index.html
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: target/doc
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url || steps.deployment-retry.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+
+      # The Pages deploy API is intermittently flaky; one retry clears it.
+      - name: Retry deploy to GitHub Pages
+        id: deployment-retry
+        if: steps.deployment.outcome == 'failure'
+        uses: actions/deploy-pages@v4

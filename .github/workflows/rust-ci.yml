@@ -1,0 +1,97 @@
+name: Rust CI
+
+on:
+  workflow_call:
+    inputs:
+      system-packages:
+        description: >-
+          Space-separated apt packages needed to build this crate. Graphics and
+          audio crates need Wayland, ALSA and udev headers; pure library crates
+          need nothing.
+        type: string
+        required: false
+        default: ''
+      toolchain:
+        description: Rust toolchain passed to dtolnay/rust-toolchain.
+        type: string
+        required: false
+        default: 'stable'
+      clippy-args:
+        description: Arguments for cargo clippy.
+        type: string
+        required: false
+        default: '--all-targets -- -D warnings'
+      build-release:
+        description: Build a release binary after the tests pass.
+        type: boolean
+        required: false
+        default: true
+      skip-unchanged-schedule:
+        description: >-
+          On scheduled runs only, skip everything when no Rust source changed in
+          the last 25 hours. Scheduled builds on an idle repository are pure
+          Actions-minute burn.
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  should-run:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 50
+
+      - name: Check for recent Rust changes
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ] || [ "${{ inputs.skip-unchanged-schedule }}" != "true" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif git log --oneline --since="25 hours ago" -- '**.rs' 'Cargo.toml' 'Cargo.lock' | grep -q .; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No Rust changes in the last 25 hours, skipping"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  check:
+    needs: should-run
+    if: needs.should-run.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    name: Format, lint, test, build
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ inputs.toolchain }}
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install system dependencies
+        if: inputs.system-packages != ''
+        run: |
+          sudo apt-get update
+          # Deliberately unquoted: the input is a space-separated package list.
+          # shellcheck disable=SC2086
+          sudo apt-get install -y ${{ inputs.system-packages }}
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Lint
+        run: cargo clippy ${{ inputs.clippy-args }}
+
+      - name: Run tests
+        run: cargo test
+
+      - name: Build release binary
+        if: inputs.build-release
+        run: cargo build --release
