@@ -28,6 +28,14 @@ on:
         type: string
         required: false
         default: 'v2.9.0'
+      golangci-args:
+        description: >-
+          Extra arguments for golangci-lint. staticcheck is disabled by
+          default because it runs standalone in this workflow; enabling it in
+          both reports the same tool twice with different check sets.
+        type: string
+        required: false
+        default: '--disable=staticcheck'
       check-gofmt:
         description: Fail if any file is not gofmt-clean.
         type: boolean
@@ -93,6 +101,11 @@ jobs:
         uses: golangci/golangci-lint-action@v7
         with:
           version: ${{ inputs.golangci-version }}
+          # staticcheck runs standalone above, pinned and with its own default
+          # check set. golangci-lint bundles staticcheck too but enables the
+          # QF quickfix family as well, so leaving both on reports the same
+          # tool twice with different opinions. One owner per tool.
+          args: ${{ inputs.golangci-args }}
 
       - name: Check for multiple consecutive blank lines
         if: inputs.check-blank-lines
