@@ -1,0 +1,114 @@
+name: Auto-Label Claude PRs
+
+on:
+  workflow_call:
+    inputs:
+      claude-email:
+        description: >-
+          Commit author email that identifies a Claude-authored pull request.
+          The second detection method after the claude/ branch prefix.
+        type: string
+        required: false
+        default: 'herve.quiroz+claude@gmail.com'
+
+permissions:
+  contents: read
+  pull-requests: write
+  actions: read
+
+jobs:
+  auto-label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Auto-add claude label to Claude PRs
+        uses: actions/github-script@v7
+        env:
+          CLAUDE_EMAIL: ${{ inputs.claude-email }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const claudeEmail = process.env.CLAUDE_EMAIL;
+
+            async function processClaudePR(prNumber) {
+              console.log(`Checking PR #${prNumber} for Claude detection...`);
+
+              const { data: pr } = await github.rest.pulls.get({
+                owner,
+                repo,
+                pull_number: prNumber
+              });
+
+              if (pr.labels.some(label => label.name === 'claude')) {
+                console.log(`✓ PR #${prNumber} already has 'claude' label`);
+                return;
+              }
+
+              // Detection 1: branch name.
+              const isClaudeBranch = pr.head.ref.startsWith('claude/');
+              console.log(`  Branch name: ${pr.head.ref}`);
+              console.log(`  Is Claude branch: ${isClaudeBranch}`);
+
+              // Detection 2: commit author.
+              const { data: commits } = await github.rest.pulls.listCommits({
+                owner,
+                repo,
+                pull_number: prNumber
+              });
+              const hasClaudeCommit = commits.some(c =>
+                c.commit.author.email === claudeEmail
+              );
+              console.log(`  Has Claude commit: ${hasClaudeCommit}`);
+
+              if (isClaudeBranch || hasClaudeCommit) {
+                const how = isClaudeBranch ? 'branch name' : 'commit author';
+                console.log(`✓ Detected Claude PR by ${how}`);
+                await github.rest.issues.addLabels({
+                  owner,
+                  repo,
+                  issue_number: prNumber,
+                  labels: ['claude']
+                });
+                console.log(`✓ Added 'claude' label to PR #${prNumber}`);
+              } else {
+                console.log(`  Not a Claude PR - no label added`);
+              }
+            }
+
+            // Which pull requests to process depends on how the caller is
+            // triggered. Repositories that run a Labeler workflow first chain
+            // off workflow_run so the two do not race; the rest trigger
+            // directly on pull_request.
+            if (context.eventName === 'pull_request' ||
+                context.eventName === 'pull_request_target') {
+              await processClaudePR(context.payload.pull_request.number);
+
+            } else if (context.eventName === 'workflow_run') {
+              const pulls = context.payload.workflow_run.pull_requests || [];
+              if (pulls.length === 0) {
+                console.log('No open PR found for this workflow run');
+                return;
+              }
+              await processClaudePR(pulls[0].number);
+
+            } else if (context.eventName === 'workflow_dispatch' ||
+                       context.eventName === 'schedule') {
+              console.log('Manual or scheduled trigger - checking all open Claude PRs...');
+              const { data: allPulls } = await github.rest.pulls.list({
+                owner,
+                repo,
+                state: 'open'
+              });
+              const claudePRs = allPulls.filter(pr => pr.head.ref.startsWith('claude/'));
+              if (claudePRs.length === 0) {
+                console.log('No open PRs from claude/* branches found');
+                return;
+              }
+              console.log(`Found ${claudePRs.length} PR(s) from claude/* branches`);
+              for (const pr of claudePRs) {
+                await processClaudePR(pr.number);
+              }
+
+            } else {
+              console.error(`Unexpected event type: ${context.eventName}`);
+            }
