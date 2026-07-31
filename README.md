@@ -25,6 +25,8 @@ Design and rationale live in
 | `monthly-audit.yml` | Opens the monthly workflow audit issue |
 | `go-analysis.yml` | gofmt, go vet, staticcheck, golangci-lint, blank lines |
 | `go-race.yml` | `go test -race` |
+| `rust-ci.yml` | cargo fmt, clippy, test, build |
+| `rust-docs.yml` | cargo doc, deployed to GitHub Pages |
 
 ## Calling a workflow
 
@@ -123,6 +125,21 @@ backlog is clear, rather than the whole adoption being blocked:
 
 Every exclusion in a consumer stub should have a tracked issue against it. They
 are adoption ramps, not settled policy.
+
+## Why a workflow lives here
+
+Not "how many repositories already copy it". That metric makes every new
+capability look unjustified until it has already been duplicated a few times,
+which is how the drift started in the first place.
+
+The test is whether a **new** repository should get the capability for free.
+`rust-ci.yml` and `rust-docs.yml` have exactly one consumer today and still
+belong here: the next Rust repository should inherit working CI from a stub
+rather than a copy that begins drifting the day it is made.
+
+That principle also shapes the defaults. `rust-docs.yml` reads the rustdoc
+redirect target from `Cargo.toml` rather than taking it as required
+configuration, so a new crate needs nothing beyond its apt packages.
 
 ## Race cadence
 
