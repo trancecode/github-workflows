@@ -25,7 +25,14 @@ jobs:
           COMMIT_RANGE="${BASE_SHA}..${HEAD_SHA}"
         else
           # For direct pushes, check the pushed commits
-          COMMIT_RANGE="${{ github.event.before }}..${{ github.event.after }}"
+          # On an initial branch push `before` is all zeros, which is not a
+          # valid rev and would make the range lookup fail.
+          BEFORE="${{ github.event.before }}"
+          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            echo "Initial branch push detected - skipping validation"
+            exit 0
+          fi
+          COMMIT_RANGE="${BEFORE}..${{ github.event.after }}"
         fi
         
         echo "Checking commits in range: $COMMIT_RANGE"
