@@ -82,11 +82,19 @@ jobs:
 
       - name: Pre-test
         if: inputs.pre-test-command != ''
+        env:
+          CI: 'true'
         run: ${{ inputs.pre-test-command }}
 
       - name: Test
+        env:
+          # Set by the runner anyway, but several repositories set it
+          # explicitly and their tests branch on it, so make it contractual.
+          CI: 'true'
         run: ${{ inputs.test-command }}
 
       - name: Post-test
         if: inputs.post-test-command != ''
+        env:
+          CI: 'true'
         run: ${{ inputs.post-test-command }}
