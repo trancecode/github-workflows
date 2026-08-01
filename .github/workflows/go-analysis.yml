@@ -45,6 +45,14 @@ on:
         type: string
         required: false
         default: 'inherit'
+      check-modernizers:
+        description: >-
+          Fail if `go fix` would rewrite anything. Off by default because a
+          repository that has never run it will have a backlog; vantage had
+          this gate before the shared migration and keeps it.
+        type: boolean
+        required: false
+        default: false
       check-gofmt:
         description: Fail if any file is not gofmt-clean.
         type: boolean
@@ -95,6 +103,19 @@ jobs:
         run: |
           echo "::group::go vet"
           go vet ./...
+          echo "::endgroup::"
+
+      - name: Check go fix modernizers
+        if: inputs.check-modernizers
+        run: |
+          echo "::group::go fix -diff"
+          diff="$(go fix -diff ./... 2>&1)"
+          if [ -n "$diff" ]; then
+            echo "$diff"
+            echo "go fix would rewrite the above; run 'go fix ./...'"
+            exit 1
+          fi
+          echo "No modernizations pending"
           echo "::endgroup::"
 
       - name: Install staticcheck
