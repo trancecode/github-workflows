@@ -62,6 +62,7 @@ jobs:
         id: create_issue
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           # Create issue body
           cat > issue_body.md << 'EOF'
@@ -113,6 +114,31 @@ jobs:
           - Once human approves suggestions, human will remove `discuss` label → Claude can implement changes
 
           EOF
+
+          # Do not stack audits. An unreviewed audit means the queue is not
+          # being drained, and filing another every month is how a fleet ends
+          # up with twenty-eight open audit issues nobody can act on. The
+          # review window in the next audit widens to cover the gap, so
+          # skipping loses no coverage.
+          #
+          # GraphQL rather than `gh issue list`: the REST list and Search
+          # endpoints both intermittently omit older issues, which is exactly
+          # how the earlier backlog stayed invisible.
+          open_audits=$(gh api graphql -f query='
+            query($owner:String!, $repo:String!) {
+              repository(owner:$owner, name:$repo) {
+                issues(states:OPEN, first:100, orderBy:{field:CREATED_AT, direction:DESC}) {
+                  nodes { number title }
+                }
+              }
+            }' -f owner="${GITHUB_REPOSITORY%%/*}" -f repo="${GITHUB_REPOSITORY##*/}" \
+            --jq '.data.repository.issues.nodes[] | select(.title | startswith("Monthly Workflow Audit")) | .number')
+
+          if [ -n "$open_audits" ]; then
+            echo "::notice::Skipping this month's audit: previous audits are still open ($(echo "$open_audits" | tr '\n' ' '))."
+            echo "Close or action them and the next scheduled run will file a fresh one covering the gap."
+            exit 0
+          fi
 
           # Create the issue
           issue_url=$(gh issue create \
