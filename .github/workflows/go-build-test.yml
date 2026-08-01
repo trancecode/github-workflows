@@ -1,0 +1,92 @@
+name: Go Build and Test
+
+# Static analysis deliberately lives in go-analysis.yml, not here. Running
+# go vet in both meant every push vetted twice, the same duplication
+# herve-quiroz/nrg#248 called out when it moved the race detector out of
+# Code Analysis.
+
+on:
+  workflow_call:
+    inputs:
+      system-packages:
+        description: >-
+          Space-separated apt packages needed to build and test. Ebitengine
+          repositories need the X11, OpenGL and ALSA headers plus xvfb;
+          headless libraries need nothing.
+        type: string
+        required: false
+        default: ''
+      go-version-file:
+        description: File the Go version is read from.
+        type: string
+        required: false
+        default: 'go.mod'
+      build-target:
+        description: Package pattern passed to go build.
+        type: string
+        required: false
+        default: './...'
+      goflags:
+        description: >-
+          GOFLAGS for the build. `-buildvcs=false` avoids a VCS stamping
+          failure when the checkout is not a full clone.
+        type: string
+        required: false
+        default: '-buildvcs=false'
+      test-command:
+        description: >-
+          Command that runs the tests. Repositories whose tests open a window
+          or a GL context wrap this in `xvfb-run -a`.
+        type: string
+        required: false
+        default: 'go test -v ./...'
+      pre-test-command:
+        description: Optional command run after the build, before the tests.
+        type: string
+        required: false
+        default: ''
+      post-test-command:
+        description: Optional command run after the tests.
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system packages
+        if: inputs.system-packages != ''
+        run: |
+          sudo apt-get update
+          # Deliberately unquoted: the input is a space-separated package list.
+          # shellcheck disable=SC2086
+          sudo apt-get install -y ${{ inputs.system-packages }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ inputs.go-version-file }}
+          cache: true
+
+      - name: Build
+        env:
+          GOFLAGS: ${{ inputs.goflags }}
+        run: go build -v ${{ inputs.build-target }}
+
+      - name: Pre-test
+        if: inputs.pre-test-command != ''
+        run: ${{ inputs.pre-test-command }}
+
+      - name: Test
+        run: ${{ inputs.test-command }}
+
+      - name: Post-test
+        if: inputs.post-test-command != ''
+        run: ${{ inputs.post-test-command }}
