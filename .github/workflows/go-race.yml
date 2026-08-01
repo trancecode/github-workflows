@@ -14,6 +14,14 @@ on:
         type: string
         required: false
         default: 'go.mod'
+      go-cache:
+        description: >-
+          Cache the Go build and module directories. Turn off for a module
+          with no third-party dependencies: setup-go warns on every run
+          because there is no go.sum to key the cache on.
+        type: boolean
+        required: false
+        default: true
       xvfb:
         description: >-
           Wrap the test run in xvfb-run. Needed by repositories whose tests
@@ -57,6 +65,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: ${{ inputs.go-version-file }}
+          cache: ${{ inputs.go-cache }}
 
       - name: Run tests with the race detector
         run: |
