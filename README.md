@@ -24,6 +24,7 @@ Design and rationale live in
 | `merge-conflict-label.yml` | Maintains the `merge conflict` label on pull requests |
 | `monthly-audit.yml` | Opens the monthly workflow audit issue |
 | `go-analysis.yml` | gofmt, go vet, staticcheck, golangci-lint, blank lines |
+| `go-build-test.yml` | go build and the test suite |
 | `go-race.yml` | `go test -race` |
 | `rust-ci.yml` | cargo fmt, clippy, test, build |
 | `rust-docs.yml` | cargo doc, deployed to GitHub Pages |
@@ -125,6 +126,31 @@ backlog is clear, rather than the whole adoption being blocked:
 
 Every exclusion in a consumer stub should have a tracked issue against it. They
 are adoption ramps, not settled policy.
+
+## Required status checks
+
+**A reusable workflow call reports its check as `caller-job / called-job`, not
+`caller-job`.** Migrating a workflow that some repository requires as a status
+check therefore breaks branch protection silently: the required context stops
+existing, and the next pull request becomes unmergeable with no obvious cause.
+
+This already happened twice here, to `analysis` and then to `build`. Before
+migrating a workflow, check both places, because rulesets and classic branch
+protection are separate:
+
+```bash
+gh api repos/OWNER/REPO/branches/main/protection/required_status_checks \
+  -q '.contexts'
+gh api repos/OWNER/REPO/rulesets
+```
+
+Then update the contexts in the same change, and verify against what is actually
+reported:
+
+```bash
+gh api repos/OWNER/REPO/commits/$(gh api repos/OWNER/REPO/commits/main -q .sha)/check-runs \
+  -q '.check_runs[].name'
+```
 
 ## Why a workflow lives here
 
