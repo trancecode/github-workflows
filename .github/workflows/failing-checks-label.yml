@@ -2,6 +2,13 @@ name: Failing Checks Label
 
 on:
   workflow_call:
+concurrency:
+  # These fire from several events at once (issue, comment, review,
+  # schedule). Overlapping runs re-read the same state and write the
+  # same labels, so only the newest is worth finishing.
+  group: failing-checks-label-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   manage-failing-checks:
     runs-on: ubuntu-latest

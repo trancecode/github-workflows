@@ -2,6 +2,13 @@ name: Issue Dependencies
 
 on:
   workflow_call:
+concurrency:
+  # These fire from several events at once (issue, comment, review,
+  # schedule). Overlapping runs re-read the same state and write the
+  # same labels, so only the newest is worth finishing.
+  group: issue-dependencies-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   manage-dependencies:
     # Skip PR comments (issue_comment fires for both issues and PRs)
