@@ -29,6 +29,20 @@ on:
         type: boolean
         required: false
         default: true
+      ignore-paths:
+        description: >-
+          Space-separated pathspecs whose changes alone do not warrant running
+          analysis, for example "*.md LICENSE docs/**". Left empty, analysis
+          always runs.
+
+          This is deliberately NOT workflow-level `paths-ignore`. A workflow
+          skipped by a path filter reports no status at all, so a required
+          status check stays Pending forever and the pull request can never
+          merge. A job skipped by `if:` reports `skipped`, which satisfies a
+          required check. Same saving, without the deadlock.
+        type: string
+        required: false
+        default: ''
       build-target:
         description: Package pattern passed to go build.
         type: string
@@ -63,7 +77,60 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether a build is warranted
+        id: decide
+        env:
+          IGNORE: ${{ inputs.ignore-paths }}
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+        run: |
+          set -u
+          if [ -z "${IGNORE// /}" ]; then
+            echo "No ignore-paths configured; running."
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          case "$EVENT" in
+            pull_request) base="$PR_BASE"; head="$PR_HEAD" ;;
+            push)         base="$PUSH_BEFORE"; head="$PUSH_AFTER" ;;
+            *) echo "Event $EVENT has no diff to inspect; running."
+               echo "run=true" >> "$GITHUB_OUTPUT"; exit 0 ;;
+          esac
+          # An initial push has an all-zeros before SHA, which is not a rev.
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+            echo "No usable base revision; running."
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # Let git do the matching. If excluding the ignored pathspecs leaves
+          # nothing, every change was ignorable.
+          excl=""
+          for p in $IGNORE; do excl="$excl :(exclude)$p"; done
+          # shellcheck disable=SC2086
+          remaining=$(git diff --name-only "$base" "$head" -- . $excl)
+          if [ -z "$remaining" ]; then
+            echo "Only ignorable paths changed; skipping the build."
+            git diff --name-only "$base" "$head" | sed 's/^/  /'
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Files warranting a build:"
+            echo "$remaining" | sed 's/^/  /'
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
