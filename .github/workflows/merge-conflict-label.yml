@@ -5,7 +5,14 @@ on:
 jobs:
   manage-merge-conflicts:
     runs-on: ubuntu-latest
-    permissions:
+    concurrency:
+  # These fire from several events at once (issue, comment, review,
+  # schedule). Overlapping runs re-read the same state and write the
+  # same labels, so only the newest is worth finishing.
+  group: merge-conflict-label-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
       pull-requests: write
       contents: read
 

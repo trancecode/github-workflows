@@ -7,7 +7,14 @@ jobs:
     # Skip PR comments (issue_comment fires for both issues and PRs)
     if: github.event_name != 'issue_comment' || !github.event.issue.pull_request
     runs-on: ubuntu-latest
-    permissions:
+    concurrency:
+  # These fire from several events at once (issue, comment, review,
+  # schedule). Overlapping runs re-read the same state and write the
+  # same labels, so only the newest is worth finishing.
+  group: issue-dependencies-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
       issues: write
       contents: read
 
