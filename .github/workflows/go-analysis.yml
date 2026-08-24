@@ -28,9 +28,15 @@ on:
         description: >-
           Pinned staticcheck release. Never use @latest: a toolchain that
           moves underneath CI fails builds on commits that changed nothing.
+
+          The flip side is that a pin goes stale against Go upgrades. 2026.1
+          could not read Go 1.27's export data ("export data version 4 is
+          greater than maximum supported version 2") and blocked the 1.27
+          bump in every Go repository at once. 2026.2 added Go 1.27 support.
+          When a Go release blocks analysis, bump this rather than unpinning.
         type: string
         required: false
-        default: '2026.1'
+        default: '2026.2.1'
       golangci-version:
         description: Pinned golangci-lint release.
         type: string
