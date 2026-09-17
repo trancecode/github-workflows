@@ -26,6 +26,14 @@ on:
         type: boolean
         required: false
         default: true
+      free-disk-space:
+        description: >-
+          Remove preinstalled toolchains the build does not use (Android SDK, .NET, GHC,
+          CodeQL) before building. For crates whose debug build artifacts fill the runner's
+          disk, such as Bevy games with several integration test binaries.
+        type: boolean
+        required: false
+        default: false
       skip-unchanged-schedule:
         description: >-
           On scheduled runs only, skip everything when no Rust source changed in
@@ -66,6 +74,13 @@ jobs:
     runs-on: ubuntu-latest
     name: Format, lint, test, build
     steps:
+      - name: Free disk space
+        if: inputs.free-disk-space
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
+
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
