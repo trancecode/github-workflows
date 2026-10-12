@@ -33,10 +33,12 @@ on:
           could not read Go 1.27's export data ("export data version 4 is
           greater than maximum supported version 2") and blocked the 1.27
           bump in every Go repository at once. 2026.2 added Go 1.27 support.
-          When a Go release blocks analysis, bump this rather than unpinning.
+          Patch releases can do the same: Go 1.27.2 moved export data to
+          version 5, which 2026.2.1 cannot read and 2026.2.2 can. When a Go
+          release blocks analysis, bump this rather than unpinning.
         type: string
         required: false
-        default: '2026.2.1'
+        default: '2026.2.2'
       golangci-version:
         description: >-
           Pinned golangci-lint release. Same reasoning as staticcheck above,
@@ -44,10 +46,11 @@ on:
           version it was built with is older than the module's go directive
           ("the Go language version (go1.26) used to build golangci-lint is
           lower than the targeted Go version"). v2.13.1 is the first release
-          built with Go 1.27.
+          built with Go 1.27, and v2.14.0 the first that can read Go 1.27.2's
+          export data; v2.13.1 fails it with typecheck errors.
         type: string
         required: false
-        default: 'v2.13.1'
+        default: 'v2.14.0'
       golangci-args:
         description: >-
           Extra arguments for golangci-lint. staticcheck is disabled by
