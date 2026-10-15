@@ -16,7 +16,7 @@ Design and rationale live in
 
 | Workflow | Purpose |
 |---|---|
-| `check-go-version.yml` | Files an issue when a newer Go release is available |
+| `check-go-version.yml` | Files an issue when a newer Go release is available, labelled `claude` and `auto-merge` |
 | `commit-validation.yml` | Enforces commit message conventions |
 | `failing-checks-label.yml` | Maintains the `failing checks` label on pull requests |
 | `input-required-label.yml` | Maintains the `input required` label on issues and pull requests |
@@ -28,6 +28,19 @@ Design and rationale live in
 | `go-race.yml` | `go test -race` |
 | `rust-ci.yml` | cargo fmt, clippy, test, build |
 | `rust-docs.yml` | cargo doc, deployed to GitHub Pages |
+
+### The `auto-merge` label
+
+`check-go-version.yml` labels the issue it files `auto-merge` as well as `claude`.
+The autonomous agent reads that label and enables auto-merge on the pull request
+it opens, so a Go version bump merges itself once the repository's required
+checks pass. The workflow creates the label when the calling repository does not
+have it.
+
+The label is set here, by the thing that knows the change is mechanical, rather
+than by the agent, which would be telling itself something it already knew.
+To keep a bump's merge with the repository owner, remove the label from the issue
+before the agent picks it up.
 
 ## Calling a workflow
 

@@ -68,9 +68,28 @@ jobs:
         # Open an issue with the `claude` label rather than crafting the PR here.
         # The autonomous Claude agent picks up `claude`-labelled issues and opens
         # the PR itself, which keeps this workflow free of git plumbing.
+        #
+        # `auto-merge` tells the agent it may merge that PR once the required
+        # checks pass. A one-directive bump in `go.mod` has CI as its whole
+        # review, and this workflow is what knows the change is mechanical; the
+        # agent never grants itself the label. Strip it from the issue before the
+        # agent starts to keep the merge with the repository owner.
+        #
+        # `gh issue create` fails outright on a label the repository does not
+        # have, and this workflow runs in repositories it does not set up, so
+        # create the label when it is missing rather than making it a
+        # prerequisite callers have to discover by breaking. Without `--force`
+        # the command fails when the label already exists, which is the common
+        # case and is not an error here; a repository that has it keeps its own
+        # colour and description. A genuine permissions failure still surfaces,
+        # because `gh issue create` below would fail on the missing label.
+        gh label create "auto-merge" \
+          --description "The agent may enable auto-merge on the PR it opens for this issue" \
+          --color 5319e7 || true
+
         gh issue create \
           --title "$TITLE" \
-          --label "claude" \
+          --label "claude,auto-merge" \
           --body "$(cat <<EOF
         A new stable Go version is available. Bump the canonical Go version in
         \`go.mod\` from \`$CURRENT_VERSION\` to \`$LATEST_VERSION\`.
