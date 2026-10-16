@@ -28,9 +28,11 @@ on:
         default: true
       free-disk-space:
         description: >-
-          Remove preinstalled toolchains the build does not use (Android SDK, .NET, GHC,
-          CodeQL) before building. For crates whose debug build artifacts fill the runner's
-          disk, such as Bevy games with several integration test binaries.
+          Remove the preinstalled toolchains and images the build does not use (Android SDK,
+          .NET, GHC, CodeQL, Swift, PowerShell, Boost, Miniconda, global npm packages and the
+          Docker images) before building, and record the space left. For crates whose debug
+          build artifacts fill the runner's disk, such as Bevy games with several integration
+          test binaries.
         type: boolean
         required: false
         default: false
@@ -78,8 +80,30 @@ jobs:
         if: inputs.free-disk-space
         run: |
           df -h /
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          # The Android SDK and .NET are the two large ones, about 22 GB together. The rest
+          # are a gigabyte or two each and cost nothing to drop, and nrg-rs needs them: with
+          # only the first five removed, its 26 GB of debug test binaries met a 35 GB
+          # allowance and the linker died part-way through the last two on 2026-10-15 and
+          # 10-16. No Rust job here uses Docker, Swift, PowerShell or conda.
+          sudo rm -rf \
+            /usr/local/lib/android \
+            /usr/share/dotnet \
+            /opt/ghc \
+            /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/share/swift \
+            /usr/local/share/powershell \
+            /usr/local/share/boost \
+            /usr/share/miniconda \
+            /usr/local/lib/node_modules
+          sudo docker image prune --all --force || true
           df -h /
+          # Put the figure in the run's annotations. A link step that runs out of disk
+          # reports `ld terminated with signal 7 [Bus error]` rather than ENOSPC, so the
+          # space left is what makes the next failure of this kind recognisable without
+          # reading the whole log.
+          avail=$(df -BG / | awk 'NR==2 {gsub(/G/, "", $4); print $4}')
+          echo "::notice title=Disk available after reclaim::${avail} GB"
 
       - uses: actions/checkout@v4
 
